@@ -10,13 +10,14 @@ import json
 model_info = joblib.load("best_model_with_features.joblib")
 model = model_info["model"]
 feature_columns=model_info["feature_columns"]
-print(feature_columns)
 data_sample= '{"HighBP": 1.0, "HighChol": 0.0, "CholCheck": 1.0, "BMI": 30.0, "Smoker": 1.0, "Stroke": 0.0, "HeartDiseaseorAttack": 1.0, "PhysActivity": 1.0, "Fruits": 1.0, "Veggies": 1.0, "HvyAlcoholConsump": 0.0, "AnyHealthcare": 1.0, "NoDocbcCost": 0.0, "GenHlth": 4.0, "MentHlth": 0.0, "PhysHlth": 0.0, "DiffWalk": 1.0, "Sex": 1.0, "Age": 9.0, "Education": 6.0, "Income": 3.0}'
+
 def row_to_json(row: Row) -> str:
     return json.dumps(row.asDict(), default=str)
+
 row_to_json_udf = F.udf(row_to_json)
+
 def process_batch(df, epoch_id):
-    print(f"Processing batch {epoch_id} with {df.count()} records")
     
     if df.count() > 0:
         df = df.withColumn(
@@ -29,15 +30,15 @@ def process_batch(df, epoch_id):
                 F.schema_of_json(data_sample)
             )
         ).select("value.*")
+
         new_df = df.select(*feature_columns)
         new_df.printSchema()
-        print(new_df.show(5))
         new_df = drop_collumns(new_df)
         new_df = has_consumed_healthy_food(new_df)
 
-        actual_feature_columns = new_df.columns
+        model_features = new_df.columns
         pandas_df = new_df.toPandas()
-        predictions = model.predict(pandas_df[actual_feature_columns].values)
+        predictions = model.predict(pandas_df[model_features].values)
         pandas_df['predicted_diabetes'] = predictions
         new_df = spark.createDataFrame(pandas_df)
 
@@ -55,6 +56,7 @@ spark = SparkSession.builder \
     .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0") \
     .getOrCreate()
 
+
 df = spark \
   .readStream \
   .format("kafka") \
@@ -70,7 +72,6 @@ df = spark \
 query = df.writeStream \
     .foreachBatch(process_batch) \
     .outputMode("append") \
-    .trigger(processingTime='10 seconds') \
     .start()
 
 
